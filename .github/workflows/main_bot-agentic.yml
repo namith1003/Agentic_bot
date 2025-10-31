@@ -76,6 +76,41 @@ jobs:
           tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_45942ADCA3014052B164ECB7DB967BE0 }}
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_6F686442926940B2AE483A263037D194 }}
 
+      - name: Ensure AzureWebJobsStorage is configured (create storage if missing)
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP_NAME='bot-agentic'
+          # Discover resource group and location
+          RG=$(az resource list --name "$APP_NAME" --resource-type Microsoft.Web/sites --query "[0].resourceGroup" -o tsv)
+          if [ -z "$RG" ]; then
+            echo "Could not determine resource group for $APP_NAME" >&2
+            exit 1
+          fi
+          LOC=$(az functionapp show -n "$APP_NAME" -g "$RG" --query location -o tsv)
+          # Check if AzureWebJobsStorage already configured
+          HAS_WJS=$(az functionapp config appsettings list -g "$RG" -n "$APP_NAME" --query "[?name=='AzureWebJobsStorage'].value | length(@)" -o tsv)
+          if [ "$HAS_WJS" != "0" ]; then
+            echo "AzureWebJobsStorage already set."
+            exit 0
+          fi
+          # Derive deterministic storage account name (must be 3-24 lower alphanum)
+          HASH=$(echo -n "$APP_NAME" | md5sum | cut -c1-12)
+          SA="funcsa${HASH}"
+          SA=${SA,,}
+          # Create storage account if not exists
+          if ! az storage account show -n "$SA" -g "$RG" >/dev/null 2>&1; then
+            az storage account create -n "$SA" -g "$RG" -l "$LOC" --sku Standard_LRS --kind StorageV2 --allow-blob-public-access false
+          fi
+          # Get connection string (requires permission to list keys)
+          CONN=$(az storage account show-connection-string -n "$SA" -g "$RG" -o tsv --query connectionString)
+          if [ -z "$CONN" ]; then
+            echo "Failed to get storage connection string for $SA" >&2
+            exit 1
+          fi
+          # Set AzureWebJobsStorage for the function app
+          az functionapp config appsettings set -g "$RG" -n "$APP_NAME" --settings AzureWebJobsStorage="$CONN"
+
       - name: 'Deploy to Azure Functions'
         uses: Azure/functions-action@v1
         id: deploy-to-function
