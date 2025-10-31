@@ -11,8 +11,9 @@ on:
   workflow_dispatch:
 
 env:
-  AZURE_FUNCTIONAPP_PACKAGE_PATH: '.' # set this to the path to your web app project, defaults to the repository root
+  AZURE_FUNCTIONAPP_PACKAGE_PATH: '.' # path to your function project (root here)
   PYTHON_VERSION: '3.12'
+  AZURE_FUNCTIONAPP_NAME: 'bot-agentic'
 
 jobs:
   build:
@@ -29,19 +30,21 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
+      - name: Create and start virtual environment
+        working-directory: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
+        run: |
+          python -m venv venv
+          source venv/bin/activate
+
+      - name: Install dependencies
+        working-directory: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
+        run: pip install -r requirements.txt
+
       # Optional: Add step to run tests here (pytest, etc.)
 
-      - name: Create deployment package (exclude dev files)
-        run: |
-          zip -r release.zip . \
-            -x "venv/*" \
-               ".venv/*" \
-               ".git/*" \
-               "__pycache__/*" \
-               "*.pyc" \
-               ".env" \
-               "local.settings.json" \
-               "*.pdf"
+      - name: Zip artifact for deployment
+        working-directory: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
+        run: zip -r ../release.zip . -x "venv/**" ".venv/**" ".git/**" "__pycache__/**" "*.pyc" ".env" "local.settings.json" "*.pdf"
 
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
@@ -66,7 +69,7 @@ jobs:
 
       - name: Unzip artifact for deployment
         run: |
-          unzip -o release.zip -d app
+          unzip -o release.zip -d package
           rm release.zip
         
       - name: Login to Azure
@@ -80,7 +83,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          APP_NAME='bot-agentic'
+          APP_NAME='${{ env.AZURE_FUNCTIONAPP_NAME }}'
           # Discover resource group and location
           RG=$(az resource list --name "$APP_NAME" --resource-type Microsoft.Web/sites --query "[0].resourceGroup" -o tsv)
           if [ -z "$RG" ]; then
@@ -111,11 +114,37 @@ jobs:
           # Set AzureWebJobsStorage for the function app
           az functionapp config appsettings set -g "$RG" -n "$APP_NAME" --settings AzureWebJobsStorage="$CONN"
 
+      - name: Set Function App settings
+        uses: azure/CLI@v2
+        with:
+          inlineScript: |
+            set -euo pipefail
+            APP_NAME='${{ env.AZURE_FUNCTIONAPP_NAME }}'
+            RG=$(az functionapp list --query "[?name=='${{ env.AZURE_FUNCTIONAPP_NAME }}'].resourceGroup | [0]" -o tsv)
+            if [ -z "$RG" ]; then
+              echo "Failed to find resource group for app $APP_NAME in the current subscription." >&2
+              exit 1
+            fi
+            echo "Using resource group: $RG"
+            az functionapp config appsettings set \
+              --name "$APP_NAME" \
+              --resource-group "$RG" \
+              --settings \
+                OPENAI_API_KEY='${{ secrets.OPENAI_API_KEY }}' \
+                PINECONE_API_KEY='${{ secrets.PINECONE_API_KEY }}' \
+                PINECONE_HOST='${{ secrets.PINECONE_HOST }}' \
+                META_VERIFY_TOKEN='${{ secrets.META_VERIFY_TOKEN }}' \
+                META_WABA_TOKEN='${{ secrets.META_WABA_TOKEN }}' \
+                META_PHONE_NUMBER_ID='${{ secrets.META_PHONE_NUMBER_ID }}' \
+                LLM_PROVIDER='${{ vars.LLM_PROVIDER || 'hf' }}' \
+                EMBEDDING_PROVIDER='openai' \
+                ADMIN_API_KEY='${{ secrets.ADMIN_API_KEY }}'
+
       - name: 'Deploy to Azure Functions'
         uses: Azure/functions-action@v1
         id: deploy-to-function
         with:
-          app-name: 'bot-agentic'
+          app-name: ${{ env.AZURE_FUNCTIONAPP_NAME }}
           slot-name: 'Production'
-          package: './app'
+          package: package
           
