@@ -19,6 +19,7 @@ from sentence_transformers import SentenceTransformer
 from huggingface_hub import InferenceClient
 from typing import Dict, Any
 
+
 load_dotenv()
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
