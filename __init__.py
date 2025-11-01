@@ -1,15 +1,35 @@
-import os
+from ast import Dict
 import json
-import logging
+import os
+from typing import Any, List
 import azure.functions as func
-from typing import Any, Dict, List
+import logging
 
-# Import the core bot logic (RAG+LLM) from bot.py
-import bot  # type: ignore
+import bot
 
+app = func.FunctionApp(http_auth_level=func.AuthLevel.FUNCTION)
 
-app = func.FunctionApp()
+@app.route(route="http_trigger")
+def http_trigger(req: func.HttpRequest) -> func.HttpResponse:
+    logging.info('Python HTTP trigger function processed a request.')
 
+    name = req.params.get('name')
+    if not name:
+        try:
+            req_body = req.get_json()
+        except ValueError:
+            pass
+        else:
+            name = req_body.get('name')
+
+    if name:
+        return func.HttpResponse(f"Hello, {name}. This HTTP triggered function executed successfully.")
+    else:
+        return func.HttpResponse(
+             "This HTTP triggered function executed successfully. Pass a name in the query string or in the request body for a personalized response.",
+             status_code=200
+        )
+    
 
 def _get_body_text_from_meta(payload: Dict[str, Any]) -> List[Dict[str, str]]:
     """Extract sender WA ID and text body from Meta WhatsApp Cloud API webhook payload.
@@ -62,21 +82,19 @@ def _send_meta_reply(phone_number_id: str, to_waid: str, text: str) -> None:
         logging.exception("Failed to send WhatsApp Cloud API reply")
 
 
-@app.route(route="whatsapp", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
-def whatsapp_verify(req: func.HttpRequest) -> func.HttpResponse:
-    """Verification endpoint for Meta (WhatsApp Cloud API)."""
-    mode = req.params.get("hub.mode")
-    token = req.params.get("hub.verify_token")
-    challenge = req.params.get("hub.challenge")
-    verify = os.getenv("WHATSAPP_VERIFY_TOKEN") or os.getenv("META_VERIFY_TOKEN")
-    if mode == "subscribe" and token and verify and token == verify:
-        return func.HttpResponse(body=str(challenge or ""), status_code=200)
-    return func.HttpResponse(status_code=403)
+@app.route(route="whatsapp")
+def whatsapp(req: func.HttpRequest) -> func.HttpResponse:
+    """Single route handling both GET (verification) and POST (messages)."""
+    if req.method == "GET":
+        mode = req.params.get("hub.mode")
+        token = req.params.get("hub.verify_token")
+        challenge = req.params.get("hub.challenge")
+        verify = os.getenv("WHATSAPP_VERIFY_TOKEN") or os.getenv("META_VERIFY_TOKEN")
+        if mode == "subscribe" and token and verify and token == verify:
+            return func.HttpResponse(body=str(challenge or ""), status_code=200)
+        return func.HttpResponse(status_code=403)
 
-
-@app.route(route="whatsapp", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
-def whatsapp_messages(req: func.HttpRequest) -> func.HttpResponse:
-    """Message receiver for Meta (WhatsApp Cloud API)."""
+    # POST: Message reception
     try:
         payload = req.get_json()
     except ValueError:
@@ -90,19 +108,16 @@ def whatsapp_messages(req: func.HttpRequest) -> func.HttpResponse:
         text = m.get("text") or ""
         waid = m.get("from") or ""
         pnid = m.get("phone_number_id") or ""
-        # Route to a business tenant if you wish; default for now
         business_id = os.getenv("DEFAULT_BUSINESS_ID", "default")
         try:
             reply = bot.answer_query(text, business_id=business_id)
-            # Attempt to send reply back to WhatsApp Cloud API (optional)
             _send_meta_reply(pnid, waid, reply)
         except Exception:
             logging.exception("Failed to process incoming WhatsApp message")
 
-    # Respond 200 to acknowledge receipt
     return func.HttpResponse(body="EVENT_RECEIVED", status_code=200)
 
-@app.route(route="http_trigger", auth_level=func.AuthLevel.FUNCTION)
+@app.route(route="http_trigger")
 def http_trigger(req: func.HttpRequest) -> func.HttpResponse:
     logging.info('Python HTTP trigger function processed a request.')
 
@@ -122,3 +137,8 @@ def http_trigger(req: func.HttpRequest) -> func.HttpResponse:
              "This HTTP triggered function executed successfully. Pass a name in the query string or in the request body for a personalized response.",
              status_code=200
         )
+    
+
+@app.route(route="health")
+def health(_: func.HttpRequest) -> func.HttpResponse:
+    return func.HttpResponse(body=json.dumps({"status": "ok"}), mimetype="application/json", status_code=200)
