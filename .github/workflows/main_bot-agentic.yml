@@ -91,7 +91,10 @@ jobs:
               --settings \
                 FUNCTIONS_WORKER_RUNTIME=python \
                 AzureWebJobsFeatureFlags=EnableWorkerIndexing \
-                PYTHON_ISOLATE_WORKER_DEPENDENCIES=1
+                PYTHON_ISOLATE_WORKER_DEPENDENCIES=1 \
+                SCM_DO_BUILD_DURING_DEPLOYMENT=true \
+                ENABLE_ORYX_BUILD=true \
+                FUNCTIONS_EXTENSION_VERSION=~4
 
       - name: Deploy to Azure Functions
         uses: Azure/functions-action@v1

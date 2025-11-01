@@ -4,17 +4,31 @@ from typing import Any, Dict
 import requests
 import azure.functions as func
 
-# Import core logic from existing module
-from bot import (
-    answer_query,
-    _embed_and_upsert,
-    BUSINESS_CONFIG,
-    save_business_config,
-    ADMIN_API_KEY,
-    PINECONE_INDEX_NAME,
-    PINECONE_HOST,
-    index,
-)
+# Import core logic from existing module, but do NOT hard-fail if env vars are missing.
+# If the import fails (e.g., missing Pinecone/OpenAI/HF keys), we still want the host
+# to load and expose at least /api/health so the Function shows up in Portal.
+BOT_READY = False
+BOT_IMPORT_ERROR = None
+try:
+    from bot import (
+        answer_query,
+        _embed_and_upsert,
+        BUSINESS_CONFIG,
+        save_business_config,
+        ADMIN_API_KEY,
+        PINECONE_INDEX_NAME,
+        PINECONE_HOST,
+        index,
+    )
+    BOT_READY = True
+except Exception as e:
+    # Defer failure to request time; surface helpful error via endpoints.
+    BUSINESS_CONFIG = {}
+    ADMIN_API_KEY = os.getenv("ADMIN_API_KEY")
+    PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME", "")
+    PINECONE_HOST = os.getenv("PINECONE_HOST", "")
+    index = None
+    BOT_IMPORT_ERROR = str(e)
 
 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
@@ -22,15 +36,23 @@ app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
 @app.route(route="health", methods=["GET"])  # GET /api/health
 def health(req: func.HttpRequest) -> func.HttpResponse:
-    return func.HttpResponse(
-        json.dumps({"status": "ok"}),
-        mimetype="application/json",
-        status_code=200,
-    )
+    body = {"status": "ok"}
+    if not BOT_READY and BOT_IMPORT_ERROR:
+        body["bot_ready"] = False
+        body["error"] = BOT_IMPORT_ERROR
+    else:
+        body["bot_ready"] = True
+    return func.HttpResponse(json.dumps(body), mimetype="application/json", status_code=200)
 
 
 @app.route(route="simulate", methods=["POST"])  # POST /api/simulate
 def simulate(req: func.HttpRequest) -> func.HttpResponse:
+    if not BOT_READY:
+        return func.HttpResponse(
+            json.dumps({"error": "bot not initialized", "detail": BOT_IMPORT_ERROR}),
+            mimetype="application/json",
+            status_code=503,
+        )
     try:
         data = req.get_json()
     except ValueError:
@@ -71,6 +93,9 @@ def whatsapp(req: func.HttpRequest) -> func.HttpResponse:
         return func.HttpResponse("forbidden", status_code=403)
 
     # Events (POST)
+    if not BOT_READY:
+        # Acknowledge to avoid webhook retries but inform missing setup
+        return func.HttpResponse("EVENT_RECEIVED", status_code=200)
     try:
         payload = req.get_json()
     except ValueError:
@@ -151,6 +176,12 @@ def _is_admin(req: func.HttpRequest) -> bool:
 
 @app.route(route="config", methods=["POST"])  # POST /api/config?business_id=default
 def set_config(req: func.HttpRequest) -> func.HttpResponse:
+    if not BOT_READY:
+        return func.HttpResponse(
+            json.dumps({"error": "bot not initialized", "detail": BOT_IMPORT_ERROR}),
+            mimetype="application/json",
+            status_code=503,
+        )
     if not _is_admin(req):
         return func.HttpResponse(
             json.dumps({"error": "unauthorized"}), mimetype="application/json", status_code=401
@@ -175,6 +206,12 @@ def set_config(req: func.HttpRequest) -> func.HttpResponse:
 
 @app.route(route="ingest", methods=["POST"])  # POST /api/ingest?business_id=default
 def ingest(req: func.HttpRequest) -> func.HttpResponse:
+    if not BOT_READY:
+        return func.HttpResponse(
+            json.dumps({"error": "bot not initialized", "detail": BOT_IMPORT_ERROR}),
+            mimetype="application/json",
+            status_code=503,
+        )
     if not _is_admin(req):
         return func.HttpResponse(
             json.dumps({"error": "unauthorized"}), mimetype="application/json", status_code=401
@@ -208,17 +245,20 @@ def ingest(req: func.HttpRequest) -> func.HttpResponse:
 
 @app.route(route="debug/stats", methods=["GET"])  # GET /api/debug/stats
 def debug_stats(req: func.HttpRequest) -> func.HttpResponse:
-    try:
-        stats = index.describe_index_stats()
+    if not BOT_READY or index is None:
+        data = {"bot_ready": BOT_READY, "error": BOT_IMPORT_ERROR}
+    else:
         try:
-            ns = stats.get("namespaces", {})
-        except Exception:
-            ns = getattr(stats, "namespaces", {}) if hasattr(stats, "namespaces") else {}
-        data = {
-            "index": PINECONE_INDEX_NAME,
-            "host": PINECONE_HOST,
-            "namespace_counts": ns,
-        }
-    except Exception as e:
-        data = {"error": str(e)}
+            stats = index.describe_index_stats()
+            try:
+                ns = stats.get("namespaces", {})
+            except Exception:
+                ns = getattr(stats, "namespaces", {}) if hasattr(stats, "namespaces") else {}
+            data = {
+                "index": PINECONE_INDEX_NAME,
+                "host": PINECONE_HOST,
+                "namespace_counts": ns,
+            }
+        except Exception as e:
+            data = {"error": str(e)}
     return func.HttpResponse(json.dumps(data), mimetype="application/json", status_code=200)
