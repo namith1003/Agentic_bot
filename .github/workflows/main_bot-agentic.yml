@@ -11,7 +11,7 @@ on:
 
 env:
   AZURE_FUNCTIONAPP_PACKAGE_PATH: './ai_bot' # deploy the ai_bot subfolder
-  PYTHON_VERSION: '3.12'
+  PYTHON_VERSION: '3.11'
   AZURE_FUNCTIONAPP_NAME: 'bot-agentic'
 
 jobs:
@@ -95,6 +95,21 @@ jobs:
                 SCM_DO_BUILD_DURING_DEPLOYMENT=true \
                 ENABLE_ORYX_BUILD=true \
                 FUNCTIONS_EXTENSION_VERSION=~4
+
+      - name: Ensure Function App Python runtime (LinuxFxVersion)
+        uses: azure/CLI@v2
+        with:
+          inlineScript: |
+            RG=$(az functionapp list --query "[?name=='${{ env.AZURE_FUNCTIONAPP_NAME }}'].resourceGroup | [0]" -o tsv)
+            if [ -z "$RG" ]; then
+              echo "Failed to find resource group for app ${{ env.AZURE_FUNCTIONAPP_NAME }} in the current subscription."
+              exit 1
+            fi
+            # Set the site config to Python|3.11 for Linux Consumption
+            az functionapp config set \
+              --name ${{ env.AZURE_FUNCTIONAPP_NAME }} \
+              --resource-group "$RG" \
+              --linux-fx-version "Python|3.11"
 
       - name: Deploy to Azure Functions
         uses: Azure/functions-action@v1

@@ -40,7 +40,8 @@ def health(req: func.HttpRequest) -> func.HttpResponse:
     return func.HttpResponse(json.dumps(body), mimetype="application/json", status_code=200)
 
 
-@app.route(route="simulate", methods=["POST"])  # POST /api/simulate
+@app.function_name(name="ai_bot")
+@app.route(route="ai_bot", methods=["POST"])  # POST /api/ai_bot
 def simulate(req: func.HttpRequest) -> func.HttpResponse:
     if not BOT_READY:
         return func.HttpResponse(
