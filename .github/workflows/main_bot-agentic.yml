@@ -1,16 +1,17 @@
-﻿# Docs for the Azure Web Apps Deploy action: https://github.com/azure/functions-action
+# Docs for the Azure Web Apps Deploy action: https://github.com/azure/functions-action
 # More GitHub Actions for Azure: https://github.com/Azure/actions
 # More info on Python, GitHub Actions, and Azure Functions: https://aka.ms/python-webapps-actions
 
-name: Build and deploy Python project to Azure Function App - bot-agentic
+name: Build and deploy email extractor timer to Azure Functions - ah-pipelines
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
   workflow_dispatch:
 
 env:
-  AZURE_FUNCTIONAPP_PACKAGE_PATH: './ai_bot' # default; we'll auto-detect root if host.json is at repo root
+  AZURE_FUNCTIONAPP_PACKAGE_PATH: './email_extractor' # deploy the function subfolder
   PYTHON_VERSION: '3.12'
   AZURE_FUNCTIONAPP_NAME: 'bot-agentic'
 
@@ -18,26 +19,11 @@ jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: read #This is required for actions/checkout
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Detect function app package path
-        id: detect
-        shell: bash
-        run: |
-          if [ -f "host.json" ]; then
-            echo "Detected host.json at repo root; packaging from root";
-            echo "package_path=." >> $GITHUB_OUTPUT
-          elif [ -f "${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}/host.json" ]; then
-            echo "Detected host.json in ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}; packaging from that folder";
-            echo "package_path=${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}" >> $GITHUB_OUTPUT
-          else
-            echo "ERROR: Could not find host.json at repo root or in ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}";
-            exit 1
-          fi
 
       - name: Setup Python version
         uses: actions/setup-python@v5
@@ -45,48 +31,33 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Create and start virtual environment
-        working-directory: ${{ steps.detect.outputs.package_path }}
+        working-directory: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
         run: |
           python -m venv venv
           source venv/bin/activate
 
       - name: Install dependencies
-        working-directory: ${{ steps.detect.outputs.package_path }}
+        working-directory: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
         run: pip install -r requirements.txt
 
       # Optional: Add step to run tests here
 
       - name: Zip artifact for deployment
-        working-directory: ${{ steps.detect.outputs.package_path }}
-        run: |
-          # Create a lean package: exclude venv, local dev files, and large docs
-          zip -r "$GITHUB_WORKSPACE/release.zip" . \
-            -x "venv/**" \
-               "*.pdf" \
-               "**/*.pdf" \
-               "local.settings.json" \
-               "Dockerfile" \
-               "README.md"
-
-      - name: Check packaged artifact exists
-        shell: bash
-        run: |
-          ls -lah "$GITHUB_WORKSPACE" || true
-          test -f "$GITHUB_WORKSPACE/release.zip" && echo "release.zip found" || (echo "release.zip missing" && exit 1)
+        working-directory: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
+        run: zip -r ../release.zip . -x "venv/**"
 
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
         with:
           name: python-app
-          path: ${{ github.workspace }}/release.zip
-          if-no-files-found: error
+          path: release.zip
 
   deploy:
     runs-on: ubuntu-latest
     needs: build
     permissions:
-      id-token: write
-      contents: read
+      id-token: write #This is required for requesting the JWT
+      contents: read #This is required for actions/checkout
 
     steps:
       - name: Download artifact from build job
@@ -98,63 +69,13 @@ jobs:
         run: |
           unzip release.zip -d package
           rm release.zip
-
+        
       - name: Login to Azure
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_EC3B302D2CF14B899DAD01782122E729 }}
           tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_45942ADCA3014052B164ECB7DB967BE0 }}
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_6F686442926940B2AE483A263037D194 }}
-
-      - name: Verify Function App exists and print properties
-        uses: azure/CLI@v2
-        with:
-          inlineScript: |
-            RG=$(az functionapp list --query "[?name=='${{ env.AZURE_FUNCTIONAPP_NAME }}'].resourceGroup | [0]" -o tsv)
-            if [ -z "$RG" ]; then
-              echo "Function App ${{ env.AZURE_FUNCTIONAPP_NAME }} not found in current subscription.";
-              exit 1
-            fi
-            echo "Resource Group: $RG"
-            echo "Basic site properties:"
-            az functionapp show --name ${{ env.AZURE_FUNCTIONAPP_NAME }} --resource-group "$RG" \
-              --query "{name:name, location:location, state:state, kind:kind, reserved:reserved, linuxFxVersion:siteConfig.linuxFxVersion, serverFarmId:serverFarmId}" -o yaml
-
-      - name: Set Function App settings (worker discovery)
-        uses: azure/CLI@v2
-        with:
-          inlineScript: |
-            RG=$(az functionapp list --query "[?name=='${{ env.AZURE_FUNCTIONAPP_NAME }}'].resourceGroup | [0]" -o tsv)
-            if [ -z "$RG" ]; then
-              echo "Failed to find resource group for app ${{ env.AZURE_FUNCTIONAPP_NAME }} in the current subscription."
-              exit 1
-            fi
-            az functionapp config appsettings set \
-              --name ${{ env.AZURE_FUNCTIONAPP_NAME }} \
-              --resource-group "$RG" \
-              --settings \
-                FUNCTIONS_WORKER_RUNTIME=python \
-                AzureWebJobsFeatureFlags=EnableWorkerIndexing \
-                PYTHON_ISOLATE_WORKER_DEPENDENCIES=1 \
-                SCM_DO_BUILD_DURING_DEPLOYMENT=true \
-                ENABLE_ORYX_BUILD=true \
-                FUNCTIONS_EXTENSION_VERSION=~4 \
-                WEBSITE_RUN_FROM_PACKAGE=1
-
-      - name: Ensure Function App Python runtime (LinuxFxVersion)
-        uses: azure/CLI@v2
-        with:
-          inlineScript: |
-            RG=$(az functionapp list --query "[?name=='${{ env.AZURE_FUNCTIONAPP_NAME }}'].resourceGroup | [0]" -o tsv)
-            if [ -z "$RG" ]; then
-              echo "Failed to find resource group for app ${{ env.AZURE_FUNCTIONAPP_NAME }} in the current subscription."
-              exit 1
-            fi
-            # Set the site config to Python|3.12 for Linux Consumption
-            az functionapp config set \
-              --name ${{ env.AZURE_FUNCTIONAPP_NAME }} \
-              --resource-group "$RG" \
-              --linux-fx-version "Python|3.12"
 
       - name: Deploy to Azure Functions
         uses: Azure/functions-action@v1
@@ -163,13 +84,4 @@ jobs:
           app-name: ${{ env.AZURE_FUNCTIONAPP_NAME }}
           slot-name: 'Production'
           package: package
-          scm-do-build-during-deployment: true
-
-      - name: Verify functions are indexed
-        uses: azure/CLI@v2
-        with:
-          inlineScript: |
-            RG=$(az functionapp list --query "[?name=='${{ env.AZURE_FUNCTIONAPP_NAME }}'].resourceGroup | [0]" -o tsv)
-            echo "Listing functions for app ${{ env.AZURE_FUNCTIONAPP_NAME }} in resource group $RG"
-            az functionapp function list --name ${{ env.AZURE_FUNCTIONAPP_NAME }} --resource-group "$RG" -o table || true
           
