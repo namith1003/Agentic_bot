@@ -136,12 +136,4 @@ jobs:
             RG=$(az functionapp list --query "[?name=='${{ env.AZURE_FUNCTIONAPP_NAME }}'].resourceGroup | [0]" -o tsv)
             echo "Listing functions for app ${{ env.AZURE_FUNCTIONAPP_NAME }} in resource group $RG"
             az functionapp list-functions --name ${{ env.AZURE_FUNCTIONAPP_NAME }} --resource-group "$RG" -o table || true
-
-      - name: Ping health endpoint
-        shell: bash
-        run: |
-          set -e
-          URL="https://${{ env.AZURE_FUNCTIONAPP_NAME }}.azurewebsites.net/api/health"
-          echo "GET $URL"
-          curl -sS --max-time 60 "$URL" || true
           
