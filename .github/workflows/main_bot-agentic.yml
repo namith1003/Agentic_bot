@@ -60,7 +60,7 @@ jobs:
         working-directory: ${{ steps.detect.outputs.package_path }}
         run: |
           # Create a lean package: exclude venv, local dev files, and large docs
-          zip -r ../release.zip . \
+          zip -r "$GITHUB_WORKSPACE/release.zip" . \
             -x "venv/**" \
                "*.pdf" \
                "**/*.pdf" \
@@ -68,11 +68,18 @@ jobs:
                "Dockerfile" \
                "README.md"
 
+      - name: Check packaged artifact exists
+        shell: bash
+        run: |
+          ls -lah "$GITHUB_WORKSPACE" || true
+          test -f "$GITHUB_WORKSPACE/release.zip" && echo "release.zip found" || (echo "release.zip missing" && exit 1)
+
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
         with:
           name: python-app
-          path: release.zip
+          path: ${{ github.workspace }}/release.zip
+          if-no-files-found: error
 
   deploy:
     runs-on: ubuntu-latest
