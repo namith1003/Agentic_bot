@@ -12,10 +12,6 @@ BOT_IMPORT_ERROR = None
 try:
     from bot import (
         answer_query,
-        _embed_and_upsert,
-        BUSINESS_CONFIG,
-        save_business_config,
-        ADMIN_API_KEY,
         PINECONE_INDEX_NAME,
         PINECONE_HOST,
         index,
@@ -23,7 +19,6 @@ try:
     BOT_READY = True
 except Exception as e:
     # Defer failure to request time; surface helpful error via endpoints.
-    BUSINESS_CONFIG = {}
     ADMIN_API_KEY = os.getenv("ADMIN_API_KEY")
     PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME", "")
     PINECONE_HOST = os.getenv("PINECONE_HOST", "")
@@ -144,16 +139,8 @@ def whatsapp(req: func.HttpRequest) -> func.HttpResponse:
                     if not from_number or not text_body:
                         continue
 
-                    # Business selection via prefix (optional)
+                    # Business selection (default)
                     business_id = "default"
-                    low = text_body.lower()
-                    if low.startswith("biz:"):
-                        try:
-                            prefix, rest = text_body.split(None, 1)
-                            business_id = prefix[4:]
-                            text_body = rest
-                        except Exception:
-                            pass
 
                     try:
                         reply = answer_query(text_body, business_id=business_id)
@@ -166,99 +153,4 @@ def whatsapp(req: func.HttpRequest) -> func.HttpResponse:
         return func.HttpResponse("EVENT_RECEIVED", status_code=200)
     except Exception:
         return func.HttpResponse("EVENT_RECEIVED", status_code=200)
-
-
-def _is_admin(req: func.HttpRequest) -> bool:
-    if not ADMIN_API_KEY:
-        return True
-    return (req.headers.get("x-api-key") or req.headers.get("X-API-Key")) == ADMIN_API_KEY
-
-
-@app.route(route="config", methods=["POST"])  # POST /api/config?business_id=default
-def set_config(req: func.HttpRequest) -> func.HttpResponse:
-    if not BOT_READY:
-        return func.HttpResponse(
-            json.dumps({"error": "bot not initialized", "detail": BOT_IMPORT_ERROR}),
-            mimetype="application/json",
-            status_code=503,
-        )
-    if not _is_admin(req):
-        return func.HttpResponse(
-            json.dumps({"error": "unauthorized"}), mimetype="application/json", status_code=401
-        )
-    try:
-        data = req.get_json()
-    except ValueError:
-        data = {}
-    business_id = (req.params.get("business_id") or "default").strip() or "default"
-    instructions = data.get("instructions")
-    if not instructions:
-        return func.HttpResponse(
-            json.dumps({"error": "instructions required"}), mimetype="application/json", status_code=400
-        )
-    BUSINESS_CONFIG[business_id] = BUSINESS_CONFIG.get(business_id, {})
-    BUSINESS_CONFIG[business_id]["instructions"] = instructions
-    save_business_config(BUSINESS_CONFIG)
-    return func.HttpResponse(
-        json.dumps({"ok": True, "business_id": business_id}), mimetype="application/json", status_code=200
-    )
-
-
-@app.route(route="ingest", methods=["POST"])  # POST /api/ingest?business_id=default
-def ingest(req: func.HttpRequest) -> func.HttpResponse:
-    if not BOT_READY:
-        return func.HttpResponse(
-            json.dumps({"error": "bot not initialized", "detail": BOT_IMPORT_ERROR}),
-            mimetype="application/json",
-            status_code=503,
-        )
-    if not _is_admin(req):
-        return func.HttpResponse(
-            json.dumps({"error": "unauthorized"}), mimetype="application/json", status_code=401
-        )
-    business_id = (req.params.get("business_id") or "default").strip() or "default"
-    try:
-        payload = req.get_json()
-    except ValueError:
-        payload = None
-    if not payload or "documents" not in payload:
-        return func.HttpResponse(
-            json.dumps({"error": "expected JSON with 'documents'"}), mimetype="application/json", status_code=400
-        )
-    docs = payload.get("documents", [])
-    if not isinstance(docs, list) or not docs:
-        return func.HttpResponse(
-            json.dumps({"error": "documents must be a non-empty list"}), mimetype="application/json", status_code=400
-        )
-    try:
-        _embed_and_upsert(docs, namespace=business_id)
-        return func.HttpResponse(
-            json.dumps({"ok": True, "ingested": len(docs), "business_id": business_id}),
-            mimetype="application/json",
-            status_code=200,
-        )
-    except Exception as e:
-        return func.HttpResponse(
-            json.dumps({"error": str(e)}), mimetype="application/json", status_code=500
-        )
-
-
-@app.route(route="debug/stats", methods=["GET"])  # GET /api/debug/stats
-def debug_stats(req: func.HttpRequest) -> func.HttpResponse:
-    if not BOT_READY or index is None:
-        data = {"bot_ready": BOT_READY, "error": BOT_IMPORT_ERROR}
-    else:
-        try:
-            stats = index.describe_index_stats()
-            try:
-                ns = stats.get("namespaces", {})
-            except Exception:
-                ns = getattr(stats, "namespaces", {}) if hasattr(stats, "namespaces") else {}
-            data = {
-                "index": PINECONE_INDEX_NAME,
-                "host": PINECONE_HOST,
-                "namespace_counts": ns,
-            }
-        except Exception as e:
-            data = {"error": str(e)}
-    return func.HttpResponse(json.dumps(data), mimetype="application/json", status_code=200)
+    # Keep the app minimal: only health, simulate and whatsapp webhook
