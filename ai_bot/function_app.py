@@ -82,7 +82,12 @@ def whatsapp(req: func.HttpRequest) -> func.HttpResponse:
         mode = req.params.get("hub.mode")
         token = req.params.get("hub.verify_token")
         challenge = req.params.get("hub.challenge")
-        verify_token = os.getenv("META_VERIFY_TOKEN") or os.getenv("WHATSAPP_VERIFY_TOKEN")
+        # Accept multiple env var names for convenience (Meta examples often use VERIFY_TOKEN)
+        verify_token = (
+            os.getenv("META_VERIFY_TOKEN")
+            or os.getenv("WHATSAPP_VERIFY_TOKEN")
+            or os.getenv("VERIFY_TOKEN")
+        )
         if mode == "subscribe" and token and verify_token and token == verify_token:
             return func.HttpResponse(challenge or "", status_code=200, mimetype="text/plain")
         return func.HttpResponse("forbidden", status_code=403)
