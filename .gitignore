@@ -34,3 +34,5 @@ htmlcov/
 
 # Docker
 *.pid
+
+.python_packages
