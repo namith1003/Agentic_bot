@@ -1,0 +1,11 @@
+flask
+python-dotenv
+openai
+pinecone
+requests
+sentence-transformers
+langdetect
+huggingface_hub
+pypdf
+dotenv
+azure-functions
