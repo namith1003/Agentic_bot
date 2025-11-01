@@ -27,6 +27,11 @@
 			"label": "pip install (functions)",
 			"type": "shell",
 			"command": "${config:azureFunctions.pythonVenv}\\\\Scripts\\\\python -m pip install -r requirements.txt"
+		},
+		{
+			"label": "pip install (functions)",
+			"type": "shell",
+			"command": "${config:azureFunctions.pythonVenv}\\\\Scripts\\\\python -m pip install -r requirements.txt"
 		}
 	]
 }
