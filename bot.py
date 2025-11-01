@@ -2,7 +2,14 @@
 import os
 import json
 from typing import List, Dict, Any
-from flask import Flask, request, Response, jsonify
+# Flask is optional for Azure Functions usage; import lazily if available
+try:
+	from flask import Flask, request, Response, jsonify
+except Exception:
+	Flask = None  # type: ignore
+	request = None  # type: ignore
+	Response = None  # type: ignore
+	jsonify = None  # type: ignore
 try:
 	from twilio.twiml.messaging_response import MessagingResponse
 except Exception:
@@ -15,7 +22,8 @@ from dotenv import load_dotenv
 from werkzeug.utils import secure_filename
 from threading import Lock
 from langdetect import detect as detect_lang
-from sentence_transformers import SentenceTransformer
+# Import sentence-transformers lazily only if needed to avoid heavy dependency when using OpenAI embeddings
+SentenceTransformer = None  # type: ignore
 from huggingface_hub import InferenceClient
 from typing import Dict, Any
 
@@ -61,6 +69,11 @@ _embedding_dim = 512  # will adjust based on provider
 def _init_embedder():
 	global _hf_embedder, _embedding_dim
 	if EMBEDDING_PROVIDER == "hf":
+		# Lazy import to avoid forcing sentence-transformers install when not used
+		global SentenceTransformer
+		if SentenceTransformer is None:
+			from sentence_transformers import SentenceTransformer as _ST  # type: ignore
+			SentenceTransformer = _ST
 		_hf_embedder = SentenceTransformer(EMBEDDING_MODEL_ID)
 		_embedding_dim = int(_hf_embedder.get_sentence_embedding_dimension())
 	else:
@@ -157,7 +170,7 @@ except Exception:
 	# Fallback: attempt ensuring index (will try serverless create if missing)
 	index = _ensure_pinecone_index(PINECONE_INDEX_NAME, _embedding_dim)
 
-app = Flask(__name__)
+app = Flask(__name__) if 'Flask' in globals() and Flask is not None else None
 _config_lock = Lock()
 
 

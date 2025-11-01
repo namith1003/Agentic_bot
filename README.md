@@ -1,4 +1,24 @@
 # Agentic Bot — Malaysia RAG WhatsApp Bot
+## Azure Functions webhook (WhatsApp Cloud API)
+This repo now includes an Azure Functions (Python) HTTP endpoint that can receive WhatsApp Meta (Cloud API) webhooks and process messages through `bot.py`:
+- GET `/.netlify/functions/health` (local: `http://localhost:7071/api/health`) — simple health check
+- GET `/api/webhook` — verification handler (responds with `hub.challenge`)
+- POST `/api/webhook` — receives messages from WhatsApp Cloud API, calls `bot.answer_query`, and optionally replies via Cloud API if `WHATSAPP_CLOUD_ACCESS_TOKEN` is configured.
+Configure the following app settings (in `local.settings.json` for local runs or in Azure App Settings):
+- `WHATSAPP_VERIFY_TOKEN` — the verify token you set in the Meta App webhook config
+- `WHATSAPP_CLOUD_ACCESS_TOKEN` — permanent access token for Cloud API (or short-lived, rotate as needed)
+- `META_GRAPH_API_VERSION` — default `v20.0`
+- `DEFAULT_BUSINESS_ID` — RAG namespace to route messages to (default `default`)
+Run locally with the VS Code task:
+1) Install deps: Tasks: "pip install (functions)" (or `pip install -r requirements.txt`)
+2) Start the host: Tasks: "func: host start" (or `func host start`)
+Your webhook URLs for local testing will be under `http://localhost:7071/api/webhook`. Use a tunnel (e.g., ngrok) to expose it publicly and configure the URL in the Meta developers console.
+Alternatively, run the Azure Functions host (uses the webhook routes above):
+```powershell
+# VS Code: Run task "func: host start"
+func host start
+```
+# Agentic Bot — Malaysia RAG WhatsApp Bot
 
 This repository contains a small Python Flask app that demonstrates a multi-business RAG (retrieval-augmented generation) chatbot focused on Malaysia. It supports Hugging Face multilingual models (for Bahasa Melayu and English) and/or OpenAI, and uses Pinecone for vector storage. The bot receives WhatsApp messages via Twilio's webhook and routes to per-business knowledge bases via Pinecone namespaces.
 

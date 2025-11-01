@@ -3,3 +3,9 @@
 # azure-monitor-opentelemetry
 
 azure-functions
+requests
+openai>=1.0.0
+pinecone-client>=3.0.0
+python-dotenv
+huggingface_hub
+langdetect
