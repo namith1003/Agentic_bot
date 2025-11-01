@@ -54,6 +54,7 @@ if OPENAI_API_KEY:
 	# OpenAI Python SDK v1
 	oa_client = OpenAI(api_key=OPENAI_API_KEY)
 
+
 # Initialize embeddings (HF or OpenAI)
 _hf_embedder = None
 _embedding_dim = 512  # will adjust based on provider
