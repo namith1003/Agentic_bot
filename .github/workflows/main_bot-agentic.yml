@@ -43,7 +43,15 @@ jobs:
 
       - name: Zip artifact for deployment
         working-directory: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
-        run: zip -r ../release.zip . -x "venv/**"
+        run: |
+          # Create a lean package: exclude venv, local dev files, and large docs
+          zip -r ../release.zip . \
+            -x "venv/**" \
+               "*.pdf" \
+               "**/*.pdf" \
+               "local.settings.json" \
+               "Dockerfile" \
+               "README.md"
 
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
@@ -94,7 +102,8 @@ jobs:
                 PYTHON_ISOLATE_WORKER_DEPENDENCIES=1 \
                 SCM_DO_BUILD_DURING_DEPLOYMENT=true \
                 ENABLE_ORYX_BUILD=true \
-                FUNCTIONS_EXTENSION_VERSION=~4
+                FUNCTIONS_EXTENSION_VERSION=~4 \
+                WEBSITE_RUN_FROM_PACKAGE=1
 
       - name: Ensure Function App Python runtime (LinuxFxVersion)
         uses: azure/CLI@v2
@@ -119,4 +128,20 @@ jobs:
           slot-name: 'Production'
           package: package
           scm-do-build-during-deployment: true
+
+      - name: Verify functions are indexed
+        uses: azure/CLI@v2
+        with:
+          inlineScript: |
+            RG=$(az functionapp list --query "[?name=='${{ env.AZURE_FUNCTIONAPP_NAME }}'].resourceGroup | [0]" -o tsv)
+            echo "Listing functions for app ${{ env.AZURE_FUNCTIONAPP_NAME }} in resource group $RG"
+            az functionapp list-functions --name ${{ env.AZURE_FUNCTIONAPP_NAME }} --resource-group "$RG" -o table || true
+
+      - name: Ping health endpoint
+        shell: bash
+        run: |
+          set -e
+          URL="https://${{ env.AZURE_FUNCTIONAPP_NAME }}.azurewebsites.net/api/health"
+          echo "GET $URL"
+          curl -sS --max-time 60 "$URL" || true
           
