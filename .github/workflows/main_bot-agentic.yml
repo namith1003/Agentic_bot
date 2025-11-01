@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 env:
-  AZURE_FUNCTIONAPP_PACKAGE_PATH: './ai_bot' # deploy the ai_bot subfolder
+  AZURE_FUNCTIONAPP_PACKAGE_PATH: './ai_bot' # default; we'll auto-detect root if host.json is at repo root
   PYTHON_VERSION: '3.11'
   AZURE_FUNCTIONAPP_NAME: 'bot-agentic'
 
@@ -24,25 +24,40 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Detect function app package path
+        id: detect
+        shell: bash
+        run: |
+          if [ -f "host.json" ]; then
+            echo "Detected host.json at repo root; packaging from root";
+            echo "package_path=." >> $GITHUB_OUTPUT
+          elif [ -f "${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}/host.json" ]; then
+            echo "Detected host.json in ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}; packaging from that folder";
+            echo "package_path=${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}" >> $GITHUB_OUTPUT
+          else
+            echo "ERROR: Could not find host.json at repo root or in ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}";
+            exit 1
+          fi
+
       - name: Setup Python version
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Create and start virtual environment
-        working-directory: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
+        working-directory: ${{ steps.detect.outputs.package_path }}
         run: |
           python -m venv venv
           source venv/bin/activate
 
       - name: Install dependencies
-        working-directory: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
+        working-directory: ${{ steps.detect.outputs.package_path }}
         run: pip install -r requirements.txt
 
       # Optional: Add step to run tests here
 
       - name: Zip artifact for deployment
-        working-directory: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
+        working-directory: ${{ steps.detect.outputs.package_path }}
         run: |
           # Create a lean package: exclude venv, local dev files, and large docs
           zip -r ../release.zip . \
@@ -83,6 +98,20 @@ jobs:
           client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_EC3B302D2CF14B899DAD01782122E729 }}
           tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_45942ADCA3014052B164ECB7DB967BE0 }}
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_6F686442926940B2AE483A263037D194 }}
+
+      - name: Verify Function App exists and print properties
+        uses: azure/CLI@v2
+        with:
+          inlineScript: |
+            RG=$(az functionapp list --query "[?name=='${{ env.AZURE_FUNCTIONAPP_NAME }}'].resourceGroup | [0]" -o tsv)
+            if [ -z "$RG" ]; then
+              echo "Function App ${{ env.AZURE_FUNCTIONAPP_NAME }} not found in current subscription.";
+              exit 1
+            fi
+            echo "Resource Group: $RG"
+            echo "Basic site properties:"
+            az functionapp show --name ${{ env.AZURE_FUNCTIONAPP_NAME }} --resource-group "$RG" \
+              --query "{name:name, location:location, state:state, kind:kind, reserved:reserved, linuxFxVersion:siteConfig.linuxFxVersion, serverFarmId:serverFarmId}" -o yaml
 
       - name: Set Function App settings (worker discovery)
         uses: azure/CLI@v2
@@ -135,5 +164,5 @@ jobs:
           inlineScript: |
             RG=$(az functionapp list --query "[?name=='${{ env.AZURE_FUNCTIONAPP_NAME }}'].resourceGroup | [0]" -o tsv)
             echo "Listing functions for app ${{ env.AZURE_FUNCTIONAPP_NAME }} in resource group $RG"
-            az functionapp list-functions --name ${{ env.AZURE_FUNCTIONAPP_NAME }} --resource-group "$RG" -o table || true
+            az functionapp function list --name ${{ env.AZURE_FUNCTIONAPP_NAME }} --resource-group "$RG" -o table || true
           
