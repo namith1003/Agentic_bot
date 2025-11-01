@@ -2,7 +2,7 @@
 # More GitHub Actions for Azure: https://github.com/Azure/actions
 # More info on Python, GitHub Actions, and Azure Functions: https://aka.ms/python-webapps-actions
 
-name: Build and deploy Python project to Azure Function App - bot-agentic
+name: Deploy Azure Function App - bot-agentic (ai_bot)
 
 on:
   push:
@@ -11,67 +11,20 @@ on:
   workflow_dispatch:
 
 env:
-  AZURE_FUNCTIONAPP_PACKAGE_PATH: '.' # path to your function project (root here)
-  PYTHON_VERSION: '3.12'
+  AZURE_FUNCTIONAPP_PACKAGE_PATH: './ai_bot' # deploy the ai_bot subfolder
   AZURE_FUNCTIONAPP_NAME: 'bot-agentic'
 
 jobs:
-  build:
+  deploy:
     runs-on: ubuntu-latest
     permissions:
-      contents: read #This is required for actions/checkout
+      id-token: write
+      contents: read
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Python version
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Create and start virtual environment
-        working-directory: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
-        run: |
-          python -m venv venv
-          source venv/bin/activate
-
-      - name: Install dependencies
-        working-directory: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
-        run: pip install -r requirements.txt
-
-      # Optional: Add step to run tests here (pytest, etc.)
-
-      - name: Zip artifact for deployment
-        working-directory: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
-        run: zip -r ../release.zip . -x "venv/**" ".venv/**" ".git/**" "__pycache__/**" "*.pyc" ".env" "local.settings.json" "*.pdf"
-
-      - name: Upload artifact for deployment job
-        uses: actions/upload-artifact@v4
-        with:
-          name: python-app
-          path: |
-            release.zip
-            !venv/
-
-  deploy:
-    runs-on: ubuntu-latest
-    needs: build
-    permissions:
-      id-token: write #This is required for requesting the JWT
-      contents: read #This is required for actions/checkout
-
-    steps:
-      - name: Download artifact from build job
-        uses: actions/download-artifact@v4
-        with:
-          name: python-app
-
-      - name: Unzip artifact for deployment
-        run: |
-          unzip -o release.zip -d package
-          rm release.zip
-        
       - name: Login to Azure
         uses: azure/login@v2
         with:
@@ -79,72 +32,32 @@ jobs:
           tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_45942ADCA3014052B164ECB7DB967BE0 }}
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_6F686442926940B2AE483A263037D194 }}
 
-      - name: Ensure AzureWebJobsStorage is configured (create storage if missing)
-        shell: bash
-        run: |
-          set -euo pipefail
-          APP_NAME='${{ env.AZURE_FUNCTIONAPP_NAME }}'
-          # Discover resource group and location
-          RG=$(az resource list --name "$APP_NAME" --resource-type Microsoft.Web/sites --query "[0].resourceGroup" -o tsv)
-          if [ -z "$RG" ]; then
-            echo "Could not determine resource group for $APP_NAME" >&2
-            exit 1
-          fi
-          LOC=$(az functionapp show -n "$APP_NAME" -g "$RG" --query location -o tsv)
-          # Check if AzureWebJobsStorage already configured
-          HAS_WJS=$(az functionapp config appsettings list -g "$RG" -n "$APP_NAME" --query "[?name=='AzureWebJobsStorage'].value | length(@)" -o tsv)
-          if [ "$HAS_WJS" != "0" ]; then
-            echo "AzureWebJobsStorage already set."
-            exit 0
-          fi
-          # Derive deterministic storage account name (must be 3-24 lower alphanum)
-          HASH=$(echo -n "$APP_NAME" | md5sum | cut -c1-12)
-          SA="funcsa${HASH}"
-          SA=${SA,,}
-          # Create storage account if not exists
-          if ! az storage account show -n "$SA" -g "$RG" >/dev/null 2>&1; then
-            az storage account create -n "$SA" -g "$RG" -l "$LOC" --sku Standard_LRS --kind StorageV2 --allow-blob-public-access false
-          fi
-          # Get connection string (requires permission to list keys)
-          CONN=$(az storage account show-connection-string -n "$SA" -g "$RG" -o tsv --query connectionString)
-          if [ -z "$CONN" ]; then
-            echo "Failed to get storage connection string for $SA" >&2
-            exit 1
-          fi
-          # Set AzureWebJobsStorage for the function app
-          az functionapp config appsettings set -g "$RG" -n "$APP_NAME" --settings AzureWebJobsStorage="$CONN"
+      # Optional: set app settings from secrets (uncomment if you want CI to manage them)
+      # - name: Set Function App settings
+      #   uses: azure/CLI@v2
+      #   with:
+      #     inlineScript: |
+      #       set -euo pipefail
+      #       APP_NAME='${{ env.AZURE_FUNCTIONAPP_NAME }}'
+      #       RG=$(az functionapp list --query "[?name=='${{ env.AZURE_FUNCTIONAPP_NAME }}'].resourceGroup | [0]" -o tsv)
+      #       az functionapp config appsettings set \
+      #         --name "$APP_NAME" \
+      #         --resource-group "$RG" \
+      #         --settings \
+      #           OPENAI_API_KEY='${{ secrets.OPENAI_API_KEY }}' \
+      #           PINECONE_API_KEY='${{ secrets.PINECONE_API_KEY }}' \
+      #           PINECONE_HOST='${{ secrets.PINECONE_HOST }}' \
+      #           META_VERIFY_TOKEN='${{ secrets.META_VERIFY_TOKEN }}' \
+      #           META_WABA_TOKEN='${{ secrets.META_WABA_TOKEN }}' \
+      #           META_PHONE_NUMBER_ID='${{ secrets.META_PHONE_NUMBER_ID }}' \
+      #           LLM_PROVIDER='hf' \
+      #           EMBEDDING_PROVIDER='openai' \
+      #           ADMIN_API_KEY='${{ secrets.ADMIN_API_KEY }}'
 
-      - name: Set Function App settings
-        uses: azure/CLI@v2
-        with:
-          inlineScript: |
-            set -euo pipefail
-            APP_NAME='${{ env.AZURE_FUNCTIONAPP_NAME }}'
-            RG=$(az functionapp list --query "[?name=='${{ env.AZURE_FUNCTIONAPP_NAME }}'].resourceGroup | [0]" -o tsv)
-            if [ -z "$RG" ]; then
-              echo "Failed to find resource group for app $APP_NAME in the current subscription." >&2
-              exit 1
-            fi
-            echo "Using resource group: $RG"
-            az functionapp config appsettings set \
-              --name "$APP_NAME" \
-              --resource-group "$RG" \
-              --settings \
-                OPENAI_API_KEY='${{ secrets.OPENAI_API_KEY }}' \
-                PINECONE_API_KEY='${{ secrets.PINECONE_API_KEY }}' \
-                PINECONE_HOST='${{ secrets.PINECONE_HOST }}' \
-                META_VERIFY_TOKEN='${{ secrets.META_VERIFY_TOKEN }}' \
-                META_WABA_TOKEN='${{ secrets.META_WABA_TOKEN }}' \
-                META_PHONE_NUMBER_ID='${{ secrets.META_PHONE_NUMBER_ID }}' \
-                LLM_PROVIDER='${{ vars.LLM_PROVIDER || 'hf' }}' \
-                EMBEDDING_PROVIDER='openai' \
-                ADMIN_API_KEY='${{ secrets.ADMIN_API_KEY }}'
-
-      - name: 'Deploy to Azure Functions'
+      - name: Deploy to Azure Functions (ai_bot folder)
         uses: Azure/functions-action@v1
-        id: deploy-to-function
         with:
           app-name: ${{ env.AZURE_FUNCTIONAPP_NAME }}
           slot-name: 'Production'
-          package: package
+          package: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
           
