@@ -1,11 +1,5 @@
-flask
-python-dotenv
-openai
-pinecone
-requests
-sentence-transformers
-langdetect
-huggingface_hub
-pypdf
-dotenv
+# Uncomment to enable Azure Monitor OpenTelemetry
+# Ref: aka.ms/functions-azure-monitor-python
+# azure-monitor-opentelemetry
+
 azure-functions
