@@ -4,6 +4,7 @@ from typing import Any, Dict
 import requests
 import azure.functions as func
 
+
 # Import core logic from existing module, but do NOT hard-fail if env vars are missing.
 # If the import fails (e.g., missing Pinecone/OpenAI/HF keys), we still want the host
 # to load and expose at least /api/health so the Function shows up in Portal.
