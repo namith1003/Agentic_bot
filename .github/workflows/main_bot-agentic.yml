@@ -32,31 +32,6 @@ jobs:
           tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_45942ADCA3014052B164ECB7DB967BE0 }}
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_6F686442926940B2AE483A263037D194 }}
 
-      - name: Configure AzureWebJobsStorage (minimal)
-        uses: azure/CLI@v2
-        env:
-          WJS: ${{ secrets.AZURE_WEBJOBS_STORAGE }}
-          ACC: ${{ secrets.AZURE_STORAGE_ACCOUNT_NAME }}
-        with:
-          inlineScript: |
-            set -euo pipefail
-            APP_NAME='${{ env.AZURE_FUNCTIONAPP_NAME }}'
-            RG=$(az functionapp list --query "[?name=='${{ env.AZURE_FUNCTIONAPP_NAME }}'].resourceGroup | [0]" -o tsv)
-            if [ -z "$RG" ]; then
-              echo "Failed to find resource group for app $APP_NAME in the current subscription." >&2
-              exit 1
-            fi
-            if [ -n "${WJS:-}" ]; then
-              echo "Setting AzureWebJobsStorage from secret."
-              az functionapp config appsettings set --name "$APP_NAME" --resource-group "$RG" --settings AzureWebJobsStorage="$WJS" 1>/dev/null
-            elif [ -n "${ACC:-}" ]; then
-              echo "Setting AzureWebJobsStorage__accountName=$ACC (requires RBAC on storage)."
-              az functionapp config appsettings set --name "$APP_NAME" --resource-group "$RG" --settings AzureWebJobsStorage__accountName="$ACC" 1>/dev/null
-            else
-              echo "AzureWebJobsStorage not configured. Add one of these repo secrets: AZURE_WEBJOBS_STORAGE (connection string) OR AZURE_STORAGE_ACCOUNT_NAME (account name with RBAC)." >&2
-              exit 1
-            fi
-
       # Optional: set app settings from secrets (uncomment if you want CI to manage them)
       # - name: Set Function App settings
       #   uses: azure/CLI@v2
